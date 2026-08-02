@@ -27,7 +27,7 @@ if [ "${1:-}" = '--list' ]; then
 fi
 
 if [ -z "$CONT" ]; then
-  echo "Контейнер базы не запущен. Сначала: docker compose up -d"
+  echo "Контейнер базы не запущен. Сначала: bash setup.sh --start"
   exit 1
 fi
 
@@ -57,7 +57,7 @@ fi
 
 echo "Восстанавливаю…"
 if gunzip -c "$src" | docker exec -i "$CONT" psql -U "$USER" -d "$DB" -q >/dev/null; then
-  echo "Готово. Проверьте приложение и, если нужно, перезапустите: docker compose restart web"
+  echo "Готово. Проверьте приложение и, если нужно, перезапустите: docker restart plan-web"
 else
   echo "Восстановление завершилось с ошибкой. Данные могли остаться в промежуточном"
   echo "состоянии — свежая копия прежних данных лежит в $DIR"

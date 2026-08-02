@@ -24,18 +24,20 @@
 ## Что нужно установить
 
 Нужен только Docker — Python, PostgreSQL и остальное ставятся внутрь контейнеров.
+Docker Compose **не нужен**: его нет на части серверов (в Ubuntu пакет `docker.io`
+идёт без плагина), а голый `docker` есть везде, где есть Docker.
 
 | Система | Что ставить |
 |---|---|
 | Windows | [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) |
 | macOS | [Docker Desktop](https://docs.docker.com/desktop/install/mac-install/) |
-| Linux (Ubuntu/Debian) | [Docker Engine](https://docs.docker.com/engine/install/ubuntu/) + [Compose](https://docs.docker.com/compose/install/linux/) |
+| Linux (Ubuntu/Debian) | [Docker Engine](https://docs.docker.com/engine/install/ubuntu/) |
 
 Проверить, что всё готово:
 
 ```bash
 docker --version
-docker compose version
+docker info
 ```
 
 ## Установка и запуск
@@ -53,8 +55,9 @@ cd plan_v3_platform
 bash setup.sh
 ```
 
-Скрипт создаст файл `.env` с новым секретным ключом и паролем базы, соберёт образ,
-поднимет PostgreSQL и приложение и применит миграции. База останется пустой.
+Скрипт создаст файл `.env` с новым секретным ключом и паролем базы, поднимет
+PostgreSQL, соберёт образ приложения, запустит его и применит миграции. База
+останется пустой.
 
 В первый раз сборка занимает несколько минут — скачивается образ Python.
 
@@ -72,7 +75,7 @@ http://localhost:8000
 База пустая — ни данных, ни пользователей, ни ролей. Заведите первого:
 
 ```bash
-docker compose exec web python manage.py createsuperuser
+docker exec -it plan-web python manage.py createsuperuser
 ```
 
 Спросит логин, почту (можно пропустить) и пароль. Дальше:
@@ -112,48 +115,35 @@ docker compose exec web python manage.py createsuperuser
 
 Все команды выполняются в каталоге проекта.
 
-**Остановить приложение**
-
 ```bash
-docker compose down
+bash setup.sh --stop      # остановить (данные остаются)
+bash setup.sh --start     # запустить снова
+bash setup.sh --status    # что сейчас работает
+bash setup.sh --logs      # логи приложения
 ```
 
-**Запустить снова**
+То же самое обычными командами Docker, если привычнее:
 
 ```bash
-docker compose up -d
-```
-
-**Перезапустить**
-
-```bash
-docker compose restart
-```
-
-**Посмотреть логи**
-
-```bash
-docker compose logs -f web      # приложение
-docker compose logs -f db       # база
-docker compose logs --tail=50 web
-```
-
-**Проверить состояние контейнеров**
-
-```bash
-docker compose ps
+docker stop plan-web plan-db
+docker start plan-db && docker start plan-web
+docker ps -a --filter name=plan-
+docker logs -f --tail 100 plan-web     # приложение
+docker logs -f --tail 100 plan-db      # база
 ```
 
 ## Обновление до новой версии
 
 ```bash
 git pull
-docker compose build
-docker compose up -d
+bash setup.sh
 ```
 
-Миграции базы применяются автоматически при запуске контейнера. Данные остаются:
-они лежат в отдельном томе Docker, а не внутри контейнера.
+`setup.sh` можно запускать сколько угодно раз: он пересобирает образ и
+пересоздаёт приложение, **не трогая том с данными**. Отдельной инструкции по
+обновлению нет намеренно — она однажды разошлась бы с установкой.
+
+Миграции базы применяются автоматически при запуске контейнера.
 
 > Перед обновлением на рабочем сервере снимите копию базы — `./db_backup.sh`.
 
@@ -193,7 +183,7 @@ docker compose up -d
 2. Залейте его в базу:
 
 ```bash
-docker compose exec -T web python manage.py import_json - < выгрузка.json
+docker exec -i plan-web python manage.py import_json - < выгрузка.json
 ```
 
 > Импорт **замещает** все данные и доступен только администратору. На вход нужен
@@ -217,7 +207,7 @@ TZ=Asia/Tashkent                   # часовой пояс
 После правки:
 
 ```bash
-docker compose up -d
+bash setup.sh
 ```
 
 Чего делать **не** нужно:
@@ -234,13 +224,13 @@ docker compose up -d
 
 | Что видно | Почему | Что делать |
 |---|---|---|
-| `bind: address already in use` | порт 8000 занят другой программой | поменяйте `PLAN_PORT` в `.env` и `docker compose up -d` |
-| Страница не открывается, `docker compose ps` показывает `Exit` | приложение упало при старте | `docker compose logs --tail=50 web` — там причина |
+| `port is already allocated` | порт 8000 занят другой программой | поменяйте `PLAN_PORT` в `.env` и запустите `bash setup.sh` |
+| Страница не открывается, `bash setup.sh --status` показывает `Exited` | приложение упало при старте | `bash setup.sh --logs` — там причина |
 | `нужен PG_PASSWORD` / `нужен DJANGO_SECRET_KEY` | нет файла `.env` | запустите `bash setup.sh` |
-| «Вход не выполнен» при включении серверного режима | нет учётной записи | `docker compose exec web python manage.py createsuperuser` |
+| «Вход не выполнен» при включении серверного режима | нет учётной записи | `docker exec -it plan-web python manage.py createsuperuser` |
 | «Нет прав на изменение раздела …» | у пользователя нет нужной роли | администратор выдаёт роль кнопкой «Пользователи» |
 | «Запись изменена другим пользователем» | кто-то сохранил ту же строку раньше | нажмите «Обновить с сервера» и внесите правку заново |
-| Данные пропали после `docker compose down -v` | флаг `-v` удаляет том вместе с базой | восстановите из копии: `./db_restore.sh` |
+| Данные пропали после `docker volume rm plan-pgdata` | том и есть база | восстановите из копии: `./db_restore.sh` |
 | Правки в `План.html` не видны | браузер держит старую версию | полная перезагрузка: `Ctrl+Shift+R` |
 
 ## Структура проекта
@@ -250,14 +240,13 @@ docker compose up -d
 help.html              справка и история изменений для пользователей
 schema.html            схема расчётов
 
-docker-compose.yml     база и приложение
-setup.sh               установка одной командой
+setup.sh               установка, обновление и управление одной командой
 db_backup.sh           резервная копия базы
 db_restore.sh          восстановление из копии
 
 server/                серверная часть (Django + DRF)
   Dockerfile           образ приложения
-  entrypoint.sh        ожидание базы, миграции, роли
+  entrypoint.sh        ожидание базы и миграции при старте
   core/
     models.py          схема базы
     api/               эндпоинты, права, роли, журнал изменений
