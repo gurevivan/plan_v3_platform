@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Схема данных «План V3» — по версиям</title>
+<style>
+  :root{
+    --bg:#f1f5f9; --panel:#ffffff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0;
+    --card:#eff6ff; --card-bd:#bfdbfe; --accent:#2563eb;
+    --new-bg:#dcfce7; --new-bd:#16a34a; --new-ink:#14532d;
+    --badge-struct:#7c3aed; --badge-logic:#d97706;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0b1220; --panel:#111a2e; --ink:#e2e8f0; --muted:#94a3b8; --line:#1e293b;
+      --card:#16233c; --card-bd:#2b4c72; --accent:#60a5fa;
+      --new-bg:#14351f; --new-bd:#22c55e; --new-ink:#bbf7d0; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:20px 24px 14px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:22px}
+  .sub{color:var(--muted);font-size:13px;margin-top:4px}
+  .wrap{display:flex;gap:0;min-height:calc(100vh - 74px)}
+  /* Timeline */
+  .tl{width:320px;flex-shrink:0;border-right:1px solid var(--line);padding:12px 0;overflow-y:auto;max-height:calc(100vh - 74px)}
+  .tl-item{position:relative;padding:10px 16px 10px 40px;cursor:pointer;border-left:3px solid transparent}
+  .tl-item:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+  .tl-item.active{background:color-mix(in srgb,var(--accent) 14%,transparent);border-left-color:var(--accent)}
+  .tl-item::before{content:"";position:absolute;left:15px;top:16px;width:11px;height:11px;border-radius:50%;
+    background:var(--panel);border:2px solid var(--muted)}
+  .tl-item.active::before{border-color:var(--accent);background:var(--accent)}
+  .tl-item::after{content:"";position:absolute;left:20px;top:26px;bottom:-10px;width:1px;background:var(--line)}
+  .tl-item:last-child::after{display:none}
+  .tl-date{font-size:11px;color:var(--muted)}
+  .tl-label{font-weight:600;font-size:13.5px;margin-top:1px}
+  .tl-kind{display:inline-block;font-size:9px;font-weight:700;color:#fff;padding:1px 6px;border-radius:999px;margin-top:4px;letter-spacing:.3px}
+  .k-struct{background:var(--badge-struct)} .k-logic{background:var(--badge-logic)}
+  /* Detail */
+  .detail{flex:1;padding:20px 24px;overflow-y:auto;max-height:calc(100vh - 74px)}
+  .d-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .d-title{font-size:19px;font-weight:700;margin:0}
+  .d-desc{color:var(--muted);margin:8px 0 18px;font-size:14px;max-width:70ch}
+  .nav{display:flex;gap:8px;margin-left:auto}
+  .nav button{font:inherit;font-size:13px;padding:5px 12px;border:1px solid var(--line);background:var(--panel);
+    color:var(--ink);border-radius:8px;cursor:pointer}
+  .nav button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .nav button:disabled{opacity:.4;cursor:default}
+  .sec{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:18px 0 8px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+  .cell{background:var(--card);border:1px solid var(--card-bd);border-radius:10px;padding:10px 12px}
+  .cell.isnew{background:var(--new-bg);border-color:var(--new-bd);box-shadow:0 0 0 2px color-mix(in srgb,var(--new-bd) 30%,transparent)}
+  .cell.dim{opacity:.32}
+  /* Убрано на этой или более ранней версии */
+  .cell.gone{background:var(--panel);border-color:var(--line);opacity:.6}
+  .cell.gone .cell-name{text-decoration:line-through;text-decoration-color:var(--muted)}
+  .cell.justgone{opacity:1;border-color:var(--badge-logic);box-shadow:0 0 0 2px color-mix(in srgb,var(--badge-logic) 32%,transparent)}
+  .gone-tag{font-size:9px;font-weight:800;color:#fff;background:var(--badge-logic);padding:1px 6px;border-radius:999px}
+  .feat.gone{opacity:.5} .feat.gone .mk{color:var(--badge-logic)}
+  .feat.gone .ftxt{text-decoration:line-through;text-decoration-color:var(--muted)}
+  .feat.justgone{opacity:1;font-weight:700}
+  .cell-name{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px}
+  .cell-fields{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.4}
+  .new-tag{font-size:9px;font-weight:800;color:#fff;background:var(--new-bd);padding:1px 6px;border-radius:999px}
+  .feat{display:flex;align-items:flex-start;gap:8px;padding:6px 0;font-size:13.5px}
+  .feat .mk{width:16px;flex-shrink:0;text-align:center}
+  .feat.on .mk{color:var(--new-bd)} .feat.isnew{font-weight:700}
+  .feat.isnew .mk{color:var(--badge-struct)}
+  .feat.off{opacity:.35} .feat.off .mk{color:var(--muted)}
+  .legend{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+  @media (max-width:780px){ .wrap{flex-direction:column} .tl{width:auto;max-height:none;border-right:none;border-bottom:1px solid var(--line)} .detail{max-height:none} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Схема данных «План&nbsp;V3» — эволюция по версиям</h1>
+  <div class="sub">Слева — версии (кликай или стрелки ← →). Справа — структура данных на выбранный момент: <b>зелёным</b> — что добавилось, <b>зачёркнутым</b> — что убрали. Последняя версия = текущее состояние (31.07.2026 20:10).</div>
+</header>
+<div class="wrap">
+  <nav class="tl" id="tl"></nav>
+  <main class="detail" id="detail"></main>
+</div>
+
+<script>
+// ── Элементы структуры (коллекции S + поля-фичи) и версия, на которой введён каждый. ──
+// intro   = индекс версии, на которой элемент появился (см. VERSIONS).
+// retired = индекс версии, на которой элемент убрали (необязательно).
+// kind: 'coll' — коллекция S, 'feat' — поле/фича.
+const ELEMENTS = [
+  // Базовая структура (v0)
+  {id:'nomenclature', kind:'coll', name:'Номенклатура', fields:'Артикул ГП, маршрут РЦ/АЦ/ШЦ/У, нормы', intro:0},
+  {id:'ops',          kind:'coll', name:'ОП / Цеха', fields:'Название, цех, передел', intro:0},
+  {id:'contracts',    kind:'coll', name:'Контракты', fields:'Номер, артикул ГП, кол-во, сроки', intro:0},
+  {id:'orders',       kind:'coll', name:'Заказы на производство', fields:'Номер, контракт, ОП по переделам', intro:0},
+  {id:'macroplan',    kind:'coll', name:'Макроплан', fields:'Контракт, артикул, ОП, месяц, норма', intro:0},
+  {id:'microplan',    kind:'coll', name:'Микроплан', fields:'Дата, бригада, передел, заказ, план/факт', intro:0},
+  {id:'schedules',    kind:'coll', name:'График (бригады)', fields:'ОП, рабочие дни, смена, эфф.', intro:0},
+  {id:'schedMonth',   kind:'coll', name:'Правки по месяцам', fields:'Бригада, месяц, смена/эфф.', intro:0},
+  {id:'holidays',     kind:'coll', name:'Праздники', fields:'Даты', intro:0},
+  {id:'manualFrv',    kind:'coll', name:'ФРВ (фонд раб. времени)', fields:'ОП, цех, месяц, варианты', intro:0},
+  {id:'tcRc',         kind:'coll', name:'Норма РЦ по заказам', fields:'{ номер заказа : норма }', intro:0},
+  // Базы и доставка (v1)
+  {id:'bases',        kind:'coll', name:'Базы', fields:'Отдельный справочник баз', intro:1},
+  {id:'customerOrders',kind:'coll',name:'Заказы клиентов', fields:'Номер, контракт, база, срок', intro:1},
+  {id:'deliveryMatrix',kind:'coll',name:'Матрица доставок', fields:'Откуда/куда, дней доставки', intro:1},
+  {id:'ordDeliv',     kind:'feat', name:'Заказы: базы поставки', fields:'orders.deliveries[] — база + срок + кол-во', intro:1},
+  // Даты РЦ (v2)
+  {id:'rcDates',      kind:'feat', name:'Заказы: даты РЦ', fields:'потребность полотна / готовность кроя', intro:2},
+  // Осн/доп (v3) — убрана в июле (v11): план стал чистым числом
+  {id:'mainExtra',    kind:'feat', name:'Микроплан: осн/доп', fields:'planReleaseMain / planReleaseExtra, % вып.', intro:3, retired:11},
+  {id:'volumeType',   kind:'feat', name:'Макроплан: тип объёма', fields:'volumeType: основной / доп.', intro:3},
+  // Состав бригады (v4)
+  {id:'schedWorkers', kind:'feat', name:'Состав бригады', fields:'schedule.workers[] — группы: числ./смена/эфф.', intro:4},
+  {id:'absence',      kind:'feat', name:'Абсентеизм', fields:'worker.absence (×0.95)', intro:4},
+  // Состав по дням (v5)
+  {id:'calOverrides', kind:'coll', name:'Правки дней (календарь)', fields:'Бригада, дата, тип дня', intro:5},
+  {id:'dayWorkers',   kind:'feat', name:'Состав по дням', fields:'calOverride.workers[] — свой состав дня', intro:5},
+  // Комментарий (v6)
+  {id:'comment',      kind:'feat', name:'Микроплан: комментарий', fields:'microRow.comment', intro:6},
+  // Baseline (v7)
+  {id:'planBaseline', kind:'coll', name:'План baseline (изначальный)', fields:'снимок плана 100% до факта — для анализа', intro:7},
+  // Норма ШЦ по заказу (v12)
+  {id:'tcSh',         kind:'coll', name:'Норма ШЦ по заказам', fields:'{ номер заказа : норма } — как у РЦ, но пошив', intro:12},
+  // Инвентаризация схемы (v13): существовало раньше, но в этой схеме не было отражено
+  {id:'orderLinks',   kind:'coll', name:'Связи ЗК ↔ ПЗ', fields:'заказ клиента ↔ заказ на производство, кол-во', intro:13},
+  {id:'routeOverrides',kind:'feat',name:'Маршрут на уровень ОП', fields:'nomenclature.routeOverrides[] — свой маршрут ОП без дубля карточки', intro:13},
+  {id:'subOrders',    kind:'feat', name:'Микроплан: подзаказы', fields:'microRow.subOrders[] — второй и далее заказ в смене', intro:13},
+  {id:'launches',     kind:'feat', name:'Микроплан: запуски', fields:'microRow.launches[] — запуск в работу по заказам', intro:13},
+  {id:'frvExtra',     kind:'feat', name:'ФРВ: доп. месяцы и строки сводной', fields:'manualFrvExtraMonths[], manualFrvPivotExtraRows[]', intro:13},
+  // Шаг 0 подготовки к серверной версии (v14)
+  {id:'coveredBefore',kind:'feat', name:'Единая метрика покрытия заказа', fields:'orderCoveredBefore() — прошлое по факту, будущее по плану', intro:14},
+  {id:'severity',     kind:'feat', name:'Уровни проверок: стоп / предупреждение', fields:'validate*.severity — проверки плана не блокируют ввод', intro:14},
+];
+
+// ── Версии (курируемая история). kind: 'struct' — менялась структура; 'logic' — правка логики. ──
+const VERSIONS = [
+  {date:'разработка', label:'Базовая структура', kind:'struct',
+   desc:'Контракты → заказы → макроплан → микроплан → график/ФРВ. Номенклатура с маршрутом РЦ→АЦ→ШЦ→У, нормы, ОП/цеха, норма РЦ по заказам.'},
+  {date:'разработка', label:'Базы и доставка', kind:'struct',
+   desc:'Отдельный справочник баз, заказы клиентов, матрица доставок между ОП/базами, базы поставки в заказах (deliveries[]).'},
+  {date:'разработка', label:'Даты РЦ по заказу', kind:'struct',
+   desc:'В заказе появились даты РЦ: потребность полотна и готовность кроя.'},
+  {date:'разработка', label:'Разбивка осн/доп', kind:'struct',
+   desc:'Микроплан делит план на «за 100% времени» (осн) и «сверх» (доп); % выполнения. В макроплане — тип объёма основной/доп.'},
+  {date:'разработка', label:'Состав бригады + абсентеизм', kind:'struct',
+   desc:'График хранит состав бригады (workers[]): группы с численностью, сменой, эффективностью и абсентеизмом (×0.95).'},
+  {date:'02.07 19:25', label:'Состав по дням', kind:'struct',
+   desc:'Правки календаря (calOverrides) получили свой состав на конкретный день (workers[]) — можно менять численность/смену по дню.'},
+  {date:'02.07 19:55', label:'Комментарий к строке', kind:'struct',
+   desc:'У строки микроплана появился комментарий (например «отключили свет») — для отслеживания причин отклонений.'},
+  {date:'02.07 21:05', label:'План baseline', kind:'struct',
+   desc:'Новая коллекция planBaseline: снимок изначального плана (100%) при первом вводе факта — чтобы в Аналитике сравнивать план ↔ факт.'},
+  {date:'03.07 13:44', label:'Округление плана', kind:'logic',
+   desc:'Структура не менялась. Логика: план микроплана округляется к ближайшему (round), а не вниз; порог осн/доп согласован (не даёт паразитный «доп 1»).'},
+  {date:'03.07 14:55', label:'Сжатие от факта', kind:'logic',
+   desc:'Структура не менялась. Логика: при вводе факта заказ, закрытый раньше срока (по факту+плану), убирается из будущих смен, следующие подтягиваются влево; строки не удаляются — освободившиеся смены остаются пустыми.'},
+  {date:'03.07 15:38 → откат', label:'Перепланировщик (откат)', kind:'logic',
+   desc:'Пробовали симметричный перепланировщик (растяжение при недовыпуске, бин-пакинг по сменам, автоподзаказы, метрика по факту) — откатили по решению. Рабочая версия вернулась к «Сжатие от факта». Код сохранён в бэкапе.'},
+  {date:'июль', label:'Осн/доп убрана, план не реагирует на факт', kind:'struct',
+   desc:'Разбивка плана на основной и дополнительный объём убрана: planReleaseMain = весь план, planReleaseExtra всегда 0. Заодно убрано авто-подтягивание «план дня = факт при перевыполнении»: план — это то, что запланировали, факт вводится отдельно и план не двигает. Перевыполнение видно как факт > план, недовыполнение — как остаток «кол-во − факт» в верхней таблице.'},
+  {date:'июль', label:'Норма ШЦ по заказу', kind:'struct',
+   desc:'Новая коллекция tcShOverrides: у каждого заказа может быть своя норма пошива — так же, как своя норма кроя в tcRcOverrides. Задаётся в макроплане (для привязанных заказов) или inline в строке микроплана. Приоритет нормы: макроплан → inline-override → номенклатура.'},
+  {date:'31.07', label:'Инвентаризация схемы', kind:'struct',
+   desc:'Структура НЕ менялась. В схему добавлены сущности, которые существовали раньше, но здесь не были отражены: связи ЗК↔ПЗ, маршруты на уровень ОП, подзаказы и запуски в строке микроплана, доп. месяцы и строки сводной ФРВ. Дата — момент документирования, а не появления.'},
+  {date:'31.07 20:10', label:'Единая метрика остатка + уровни проверок', kind:'logic',
+   desc:'Структура не менялась. Логика: (1) введён единый хелпер orderCoveredBefore — «сколько по заказу+переделу покрыто до даты»: прошлое считаем по факту, будущее по плану. Раньше подсказка «≤N (ЗАК)» и ядро авто-плана считали остаток по-разному, отсюда «план 0 при живом остатке» и исчезающий хвост заказа при отставании. (2) Проверки разделены на два уровня: стоп (физика — блокирует ввод) и предупреждение (расхождение планирования — сохраняем и показываем жёлтый индикатор). Перепланировщик НЕ возвращён.'},
+];
+
+const tl = document.getElementById('tl');
+const detail = document.getElementById('detail');
+let cur = VERSIONS.length - 1;
+
+VERSIONS.forEach((v,i)=>{
+  const el = document.createElement('div');
+  el.className='tl-item'; el.dataset.i=i;
+  el.innerHTML = `<div class="tl-date">${v.date}</div><div class="tl-label">${v.label}</div>`+
+    `<span class="tl-kind ${v.kind==='struct'?'k-struct':'k-logic'}">${v.kind==='struct'?'структура':'логика'}</span>`;
+  el.onclick=()=>select(i);
+  tl.appendChild(el);
+});
+
+function select(i){
+  cur = Math.max(0, Math.min(VERSIONS.length-1, i));
+  [...tl.children].forEach((c,idx)=>c.classList.toggle('active', idx===cur));
+  render();
+  const active = tl.children[cur];
+  if(active) active.scrollIntoView({block:'nearest'});
+}
+
+function render(){
+  const v = VERSIONS[cur];
+  const colls = ELEMENTS.filter(e=>e.kind==='coll');
+  const feats = ELEMENTS.filter(e=>e.kind==='feat');
+  const cellHtml = e=>{
+    const shown = e.intro<=cur, isnew = e.intro===cur;
+    const gone = e.retired != null && cur >= e.retired, justgone = e.retired === cur;
+    const tag = justgone ? '<span class="gone-tag">− убрано</span>'
+              : gone ? '<span class="gone-tag">убрано</span>'
+              : isnew ? '<span class="new-tag">+ добавлено</span>' : '';
+    return `<div class="cell ${gone?'gone':''} ${justgone?'justgone':''} ${isnew&&!gone?'isnew':''} ${shown?'':'dim'}">
+      <div class="cell-name">${e.name} ${tag}</div>
+      <div class="cell-fields">${e.fields}</div></div>`;
+  };
+  const featHtml = e=>{
+    const shown = e.intro<=cur, isnew = e.intro===cur;
+    const gone = e.retired != null && cur >= e.retired, justgone = e.retired === cur;
+    const cls = gone ? `gone${justgone?' justgone':''}` : (isnew?'isnew':(shown?'on':'off'));
+    const mk = gone ? '✕' : (isnew?'●':(shown?'✓':'·'));
+    const note = justgone ? ' — убрано' : (isnew && !gone ? ' — добавлено' : '');
+    return `<div class="feat ${cls}"><span class="mk">${mk}</span><span class="ftxt">${e.name}${note} <span style="color:var(--muted);font-weight:400">· ${e.fields}</span></span></div>`;
+  };
+  detail.innerHTML = `
+    <div class="d-head">
+      <h2 class="d-title">${v.label}</h2>
+      <span class="tl-kind ${v.kind==='struct'?'k-struct':'k-logic'}">${v.kind==='struct'?'изменение структуры':'правка логики'}</span>
+      <span style="color:var(--muted);font-size:13px">· ${v.date}</span>
+      <div class="nav">
+        <button ${cur===0?'disabled':''} onclick="select(cur-1)">← пред.</button>
+        <button ${cur===VERSIONS.length-1?'disabled':''} onclick="select(cur+1)">след. →</button>
+      </div>
+    </div>
+    <p class="d-desc">${v.desc}</p>
+    <div class="sec">Коллекции состояния S</div>
+    <div class="grid">${colls.map(cellHtml).join('')}</div>
+    <div class="sec">Поля и доработки</div>
+    <div>${feats.map(featHtml).join('')}</div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--new-bd)"></span> добавлено на этой версии</span>
+      <span><span class="dot" style="background:var(--card-bd)"></span> уже есть</span>
+      <span><span class="dot" style="background:var(--badge-logic)"></span> убрано</span>
+      <span><span class="dot" style="background:var(--muted);opacity:.4"></span> появится позже</span>
+      <span><span class="dot" style="background:var(--badge-struct)"></span> структура&nbsp;&nbsp;<span class="dot" style="background:var(--badge-logic)"></span> логика</span>
+    </div>`;
+}
+
+document.addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft') select(cur-1);
+  else if(e.key==='ArrowRight') select(cur+1);
+});
+select(cur);
+</script>
+</body>
+</html>
