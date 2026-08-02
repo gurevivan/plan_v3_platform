@@ -87,6 +87,18 @@ fi
 set -a; . ./.env; set +a
 PLAN_PORT="${PLAN_PORT:-8000}"
 
+# Занятый порт — самая частая осечка при установке. Docker в этом случае выдаёт
+# простыню про endpoint и networking, из которой не видно ни порта, ни того, что
+# делать. Проверяем заранее и говорим по-человечески.
+if [ -z "$(docker ps -q --filter "name=$WEB")" ] \
+   && (command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -qE "[:.]${PLAN_PORT}[[:space:]]"); then
+  echo "Порт ${PLAN_PORT} уже занят другой программой."
+  echo
+  echo "Откройте .env, поставьте другой PLAN_PORT (например, $((PLAN_PORT + 1)))"
+  echo "и запустите установку снова:  bash setup.sh"
+  exit 1
+fi
+
 # ── Сеть и том ──────────────────────────────────────────────────────────────
 docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null
 docker volume  inspect "$VOL" >/dev/null 2>&1 || docker volume  create "$VOL" >/dev/null
