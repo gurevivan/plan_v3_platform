@@ -251,3 +251,92 @@ def test_article_order_does_not_split_rows():
     merged, _ = mg.prepare(first, second)
     assert len(merged['microplan']) == 1
     assert merged['microplan'][0]['planRelease'] == 99
+
+
+def test_references_survive_duplicates_inside_one_file():
+    """Дубль внутри файла не должен обрывать ссылки.
+
+    Если два одинаковых контракта получат РАЗНЫЕ номера, слияние оставит одну
+    запись, а строка микроплана, ссылавшаяся на второй номер, окажется привязана
+    к контракту, которого больше нет. На экране это выглядит как «контракт не
+    указан», а причина — в заливке недельной давности.
+    """
+    incoming = state(
+        contracts=[contract(1, 'К-01'), contract(2, 'К-01')],
+        schedules=[schedule(5, 'Бригада А'), schedule(6, 'Бригада А')],
+        microplan=[micro(9, '2026-08-03', 'ЗАК-0001', 5, contract_id=1)])
+
+    merged, _ = mg.prepare(state(), incoming)
+
+    cids = {c['id'] for c in merged['contracts']}
+    sids = {s['id'] for s in merged['schedules']}
+    row = merged['microplan'][0]
+
+    assert len(cids) == 1 and len(sids) == 1, 'дубли не схлопнулись'
+    assert row['contractId'] in cids, 'ссылка на контракт повисла'
+    assert row['scheduleId'] in sids, 'ссылка на бригаду повисла'
+
+
+# ── Ключи, найденные на боевых данных ───────────────────────────────────────
+#
+# Все три случая ниже — записи, которые ВЫГЛЯДЯТ дублями, но законно различны.
+# Слишком широкий ключ схлопывал их и терял данные. Найдено на боевой выгрузке.
+
+def test_same_contract_number_different_products():
+    """Под одним номером контракта идут разные изделия — это разные записи.
+
+    В боевой выгрузке «QA 10-26» — и футболка, и трусы. Сливать по номеру значит
+    потерять изделие.
+    """
+    incoming = state(contracts=[
+        contract(1, 'QA 10-26', articleGp='01.000001', name='Футболка'),
+        contract(2, 'QA 10-26', articleGp='01.000002', name='Трусы')])
+
+    merged, _ = mg.prepare(state(), incoming)
+    assert len(merged['contracts']) == 2, 'разные изделия слиплись в один контракт'
+
+
+def test_same_brigade_different_months():
+    """Бригада с тем же названием живёт в разных месяцах отдельными записями.
+
+    У них разный состав и разные графики; в боевой выгрузке таких пять из
+    двадцати двух.
+    """
+    may = dict(schedule(1, 'Бригада 1'), activeMonths=['2026-05'])
+    summer = dict(schedule(2, 'Бригада 1'), activeMonths=['2026-06', '2026-07'])
+
+    merged, _ = mg.prepare(state(), state(schedules=[may, summer]))
+    assert len(merged['schedules']) == 2, 'бригады разных месяцев слиплись'
+
+
+def test_macroplan_rows_are_not_aggregated():
+    """Макроплан не агрегируется: каждая введённая запись — отдельная строка.
+
+    Две строки на один месяц и артикул законны и различаются количеством, нормой
+    и заказами. На боевых данных 15729 + 23953 превращались в 23953 — молча.
+    """
+    row = lambda rid, qty, norm, orders: {
+        'id': rid, 'contractId': 1, 'articleItem': '01.000001/1', 'op': 'ОП-1',
+        'workshop': 'Швейный цех', 'month': '2026-06', 'volumeType': 'main',
+        'qtySew': qty, 'normOverride': norm, 'orderNums': orders, 'eff': 100}
+
+    incoming = state(contracts=[contract(1, 'К-01')], macroplan=[
+        row(72, 15729, 7.05, ['ЗАК-0011', 'ЗАК-0012']),
+        row(730, 23953, 7.1, ['ЗАК-0013'])])
+
+    merged, _ = mg.prepare(state(), incoming)
+    assert len(merged['macroplan']) == 2, 'строки макроплана схлопнулись'
+    assert sum(r['qtySew'] for r in merged['macroplan']) == 15729 + 23953
+
+
+def test_identical_macroplan_rows_still_collapse():
+    """А вот полностью одинаковые строки — дубль, и его схлопнуть нужно:
+    иначе повторная заливка того же файла удваивала бы план."""
+    row = {'id': 1, 'contractId': 1, 'articleItem': 'А-1', 'op': 'ОП-1',
+           'workshop': 'Швейный цех', 'month': '2026-06', 'volumeType': 'main',
+           'qtySew': 100, 'normOverride': 2.0, 'orderNums': ['ЗАК-0011']}
+
+    merged, _ = mg.prepare(state(contracts=[contract(1, 'К-01')], macroplan=[row]),
+                           state(contracts=[contract(1, 'К-01')],
+                                 macroplan=[dict(row, id=99)]))
+    assert len(merged['macroplan']) == 1

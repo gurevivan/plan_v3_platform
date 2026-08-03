@@ -40,13 +40,25 @@ NATURAL_KEYS = {
     'deliveryMatrix': ('fromOp', 'toOp'),
     'holidays': ('date',),
     'nomenclature': ('articleGp',),
-    'contracts': ('number',),
+    # Номер контракта НЕ уникален: под одним номером идут разные изделия
+    # («QA 10-26» — и футболка, и трусы). Сливать их по номеру значит потерять
+    # изделие. Проверено на боевой выгрузке: 3 таких пары из 12 контрактов.
+    'contracts': ('number', 'articleGp'),
     'customerOrders': ('number',),
     'orders': ('number',),
-    'schedules': ('op', 'workshop', 'name'),
+    # Бригада с тем же названием живёт в РАЗНЫХ месяцах отдельными записями
+    # («Бригада 1» на 2026-05 и на 2026-06..08 — разный состав и разные графики).
+    # Без месяцев слияние схлопывало 5 бригад из 22.
+    'schedules': ('op', 'workshop', 'name', 'activeMonths'),
     'macroEff': ('op', 'workshop', 'month'),
     'manualFrv': ('op', 'workshop', 'month'),
-    'macroplan': ('contractId', 'articleItem', 'op', 'workshop', 'month', 'volumeType'),
+    # Макроплан НЕ агрегируется: каждая введённая запись — отдельная строка со
+    # своей нормой и своими заказами (CLAUDE.md §7). Две строки на один месяц и
+    # артикул законны и различаются количеством, нормой и заказами — они и входят
+    # в ключ. Иначе слияние складывало бы их в одну и теряло объём: на боевых
+    # данных 15729 + 23953 превращались в 23953.
+    'macroplan': ('contractId', 'articleItem', 'op', 'workshop', 'month', 'volumeType',
+                  'qtySew', 'normOverride', 'orderNums'),
     # Артикулы в ключе обязательны: изделие из нескольких частей даёт в одной
     # смене несколько законных строк (куртка и брюки костюма). Без них слияние
     # схлопывало их в одну — и половина плана исчезала молча.
@@ -119,17 +131,28 @@ def build_id_map(data: dict, existing: dict, next_ids: dict) -> dict:
         mapping = {}
         used = set(existing.get(coll, {}).values())
         nxt = next_ids.get(coll, 1)
+        seen = {}                      # ключ → id, выданный в ЭТОМ же файле
         for rec in data.get(coll) or []:
             old = rec.get('id')
             if old is None:
                 continue
-            found = existing.get(coll, {}).get(key_of(coll, rec))
+            key = key_of(coll, rec)
+            found = existing.get(coll, {}).get(key)
             if found is not None:
                 mapping[old] = found
+                continue
+            # Тот же ключ уже встречался в файле — это дубль, и он обязан получить
+            # ТОТ ЖЕ номер. Иначе слияние оставит одну запись, а ссылки на второй
+            # номер повиснут: строка микроплана окажется привязана к контракту,
+            # которого больше нет.
+            if key is not None and key in seen:
+                mapping[old] = seen[key]
                 continue
             while nxt in used:
                 nxt += 1
             mapping[old] = nxt
+            if key is not None:
+                seen[key] = nxt
             used.add(nxt)
             nxt += 1
         id_map[coll] = mapping
