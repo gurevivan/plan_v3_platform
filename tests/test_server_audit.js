@@ -52,7 +52,8 @@ Object.defineProperty(ctx.SRV, 'on', { get: () => serverOn, set: (v) => { server
 
 function baseState() {
   T.S = {
-    contracts: [], orders: [], macroplan: [], macroEff: [], microplan: [],
+    contracts: [], customerOrders: [], orders: [], macroplan: [], macroEff: [],
+    microplan: [],
     schedules: [], scheduleMonthOverrides: [], calOverrides: [], manualFrv: [],
     planBaseline: [], holidays: [], orderLinks: [],
     nomenclature: [], ops: [], bases: [], deliveryMatrix: [],
@@ -140,6 +141,51 @@ function baseState() {
   await ctx.srvChangesDialog('microplan');
   check('запросов нет', calls.length, 0);
   check('сказано, почему', /только в серверном режиме/.test(alerts.join('\n')), true);
+
+  // ── Диалог заливки закрывается после успеха ─────────────────────────────
+  console.log('\n── Кнопка после заливки закрывает окно ──');
+  ctx.SRV.user = { username: 'шеф', is_superuser: true, roles: [],
+                   all_ops: true, ops_read: [], ops_edit: [],
+                   all_sections: true, sections_edit: [] };
+  serverOn = true;
+
+  // Собираем окно так же, как его строит приложение, и следим за кнопками.
+  const buttons = {};
+  let removed = 0;
+  const node = (id) => {
+    const el = {
+      id, style: {}, textContent: '', innerHTML: '', disabled: false,
+      onclick: null, onchange: null, value: 'merge', checked: true,
+      files: [], parentNode: { insertBefore() {} },
+      querySelector: (sel) => node(String(sel).replace('#', '')),
+      querySelectorAll: () => [],
+      appendChild() {}, insertBefore() {}, setAttribute() {}, addEventListener() {},
+    };
+    if (id) buttons[id] = buttons[id] || el;
+    return buttons[id] || el;
+  };
+  ctx.document.createElement = () => node('');
+  ctx.document.body = { appendChild() {}, removeChild() { removed++; } };
+
+  baseState();
+  // Файл отдаём заранее — так же, как это делает кнопка «Загрузить».
+  const file = { name: 'выгрузка.json', text: async () => JSON.stringify({
+    ops: [{ id: 1, name: 'ОП-1' }], microplan: [] }) };
+
+  await ctx.srvUploadDialog(file);
+  const go = buttons['_upGo'];
+  check('кнопка «Залить» есть', !!go, true);
+
+  await go.onclick();
+  await new Promise(r => setTimeout(r, 0));
+
+  check('кнопка снова активна', go.disabled, false);
+  check('надпись стала «Закрыть»', go.textContent, 'Закрыть');
+  check('и она закрывает окно', typeof go.onclick, 'function');
+
+  const removedBefore = removed;
+  go.onclick();
+  check('окно действительно закрылось', removed > removedBefore, true);
 
   finish();
 })();

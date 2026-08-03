@@ -757,7 +757,7 @@
       </div>
       <input type="file" id="loadAnyFile" accept=".json" style="display:none" onchange="_loadFileInput(this.files[0])">
     </div>
-    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 03.08.2026 00:30</span></h1>
+    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 03.08.2026 01:10</span></h1>
   </header>
   <div class="app-body">
     <aside class="app-sidebar" aria-label="Разделы приложения">
@@ -11343,8 +11343,17 @@ async function srvUploadRun(box, close, preselected) {
   for (const kind of SRV_LOAD_ORDER) await srvLoad(kind);
   recalcNextId();
   renderActive();
-  go.textContent = 'Готово';
   out.textContent += '\nГотово.';
+
+  // Кнопка становится «Закрыть» и действительно закрывает: раньше она меняла
+  // надпись на «Готово», но оставалась выключенной, и окно приходилось закрывать
+  // «Отменой» — будто заливка не удалась.
+  go.disabled = false;
+  go.textContent = 'Закрыть';
+  go.onclick = close;
+
+  const cancel = box.querySelector('#_upCancel');
+  if (cancel) cancel.style.display = 'none';    // второй кнопки «закрыть» не нужно
 }
 
 // ───────────────────────────── Журнал изменений ──────────────────────────────
