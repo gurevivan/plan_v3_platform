@@ -64,7 +64,8 @@ function asUser(sections, over = {}) {
 
 function baseState() {
   T.S = {
-    contracts: [], orders: [], macroplan: [], macroEff: [], microplan: [],
+    contracts: [], customerOrders: [], orders: [], macroplan: [], macroEff: [],
+    microplan: [],
     schedules: [], scheduleMonthOverrides: [], calOverrides: [], manualFrv: [],
     planBaseline: [], holidays: [], orderLinks: [],
     nomenclature: [], ops: [], bases: [], deliveryMatrix: [],
@@ -291,6 +292,50 @@ const contract = (over = {}) => Object.assign({
   check('со справочником площадки уходят',
         sent2 && sent2.body.ops && sent2.body.ops[0].op_name, 'Бухара');
   check('право правки передано', sent2 && sent2.body.ops[0].can_edit, true);
+
+  // ── Видно, что лежит в базе ─────────────────────────────────────────────
+  console.log('\n── Полоса показывает состав базы ──');
+  baseState(); reset();
+  asUser([], { is_superuser: true, all_sections: true });
+  T.S.nomenclature = [{ id: 1 }, { id: 2 }];
+  T.S.ops = [{ id: 1 }];
+  ctx.activeTab = 'refs';
+  const refsBanner = ctx.srvBannerHtml('refs');
+  // Без этой подписи процесс невидим: человек грузит файл в браузер, видит
+  // справочники, жмёт «Обновить с сервера» — и они пропадают, потому что в базе
+  // их никогда не было.
+  check('видно, сколько записей в базе', /в базе:/.test(refsBanner), true);
+  check('названа номенклатура', /номенклатура 2/.test(refsBanner), true);
+  check('и ОП', /ОП 1/.test(refsBanner), true);
+
+  baseState();
+  check('пустая база названа нулями', /номенклатура 0/.test(ctx.srvBannerHtml('refs')), true);
+
+  // ── Включение режима предупреждает о замещении ──────────────────────────
+  console.log('\n── Локальные данные не исчезают молча ──');
+  baseState(); reset();
+  T.S.nomenclature = [{ id: 1 }, { id: 2 }];
+  T.S.ops = [{ id: 1 }];
+  check('локальные записи посчитаны', ctx.srvLocalRecordCount(), 3);
+
+  serverOn = false;
+  let asked = [];
+  const savedConfirm = ctx._confirm;
+  ctx._confirm = (msg) => { asked.push(String(msg)); return Promise.resolve(false); };
+  await ctx.toggleServerMode(true);
+  check('спросили перед замещением', asked.length, 1);
+  check('в вопросе названо количество', /3 записей/.test(asked[0] || ''), true);
+  check('сказано, как перенести в базу', /Залить файл/.test(asked[0] || ''), true);
+  check('отказ оставил режим выключенным', serverOn, false);
+  check('локальные данные на месте', T.S.nomenclature.length, 2);
+
+  // Пустой браузер — терять нечего, спрашивать не о чем.
+  baseState(); asked = [];
+  serverOn = false;
+  await ctx.toggleServerMode(true);
+  check('на пустом состоянии не спрашиваем', asked.length, 0);
+  ctx._confirm = savedConfirm;
+  serverOn = true;
 
   finish();
 })();

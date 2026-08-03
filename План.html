@@ -757,7 +757,7 @@
       </div>
       <input type="file" id="loadAnyFile" accept=".json" style="display:none" onchange="_loadFileInput(this.files[0])">
     </div>
-    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 02.08.2026 20:30</span></h1>
+    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 02.08.2026 22:10</span></h1>
   </header>
   <div class="app-body">
     <aside class="app-sidebar" aria-label="Разделы приложения">
@@ -11063,6 +11063,17 @@ const SRV_TAB_KINDS = {
                'schedules', 'nomenclature', 'ops'],
 };
 
+/** Короткие названия коллекций — для подписи «в базе: …» в полосе режима. */
+const SRV_KIND_LABEL = {
+  nomenclature: 'номенклатура', ops: 'ОП', bases: 'базы',
+  deliveryMatrix: 'матрица доставок', contracts: 'контракты',
+  orders: 'заказы', orderLinks: 'связи заказов', macroplan: 'макроплан',
+  macroEff: 'эффективность', microplan: 'микроплан', schedules: 'бригады',
+  scheduleMonthOverrides: 'правки месяцев', calOverrides: 'правки дней',
+  manualFrv: 'ФРВ', holidays: 'выходные', planBaseline: 'изначальный план',
+  timeCosts: 'нормы заказов',
+};
+
 /** Человеческое название вкладки для полосы режима. */
 const SRV_TAB_LABEL = {
   refs: 'справочники', contracts: 'контракты', manualFrv: 'ФРВ',
@@ -11108,6 +11119,7 @@ function srvBannerHtml(kind) {
     ${locked ? `<span style="padding:2px 8px;border-radius:6px;background:#fef3c7;
         border:1px solid #f59e0b;color:#92400e"><b>Только просмотр</b> —
         раздел «${esc(srvSectionTitle(section))}» вам не открыт</span>` : ''}
+    ${on ? `<span style="color:#475569">· в базе: ${esc(srvTabCounts(tab))}</span>` : ''}
     ${on ? `<button class="btn btn-outline btn-sm" onclick="srvReloadTab('${tab}')">Обновить с сервера</button>` : ''}
     ${on && tab === 'analytics'
       ? `<button class="btn btn-outline btn-sm" onclick="srvCheckAnalytics()">Сверить с расчётом сервера</button>` : ''}
@@ -11118,6 +11130,38 @@ function srvBannerHtml(kind) {
       ? `<button class="btn btn-outline btn-sm" onclick="srvUsersDialog()">Пользователи</button>` : ''}
     ${on ? `<button class="btn btn-outline btn-sm" onclick="srvLogout()">Выйти</button>` : ''}
   </div>`;
+}
+
+/** Сколько всего записей сейчас в локальном состоянии — по коллекциям, которые
+ *  переведены на сервер. Нужно, чтобы предупредить о замещении при включении
+ *  режима: считать «есть ли что терять» на глаз нельзя. */
+function srvLocalRecordCount() {
+  let n = 0;
+  for (const kind in SRV_ENTITIES) {
+    const coll = S[SRV_ENTITIES[kind].coll];
+    if (Array.isArray(coll)) n += coll.length;
+  }
+  return n;
+}
+
+/** Сколько записей вкладки пришло с сервера.
+ *
+ *  В серверном режиме `S` — это и есть данные базы, поэтому считаем прямо по нему.
+ *  Без такой подписи процесс невидим: человек грузит файл в браузер, видит
+ *  справочники, жмёт «Обновить с сервера» — и они пропадают, потому что в базе их
+ *  никогда и не было. Теперь видно сразу, что там ноль. */
+function srvTabCounts(tab) {
+  const kinds = SRV_TAB_KINDS[tab] || SRV_TAB_KINDS[activeTab] || [];
+  const parts = [];
+  for (const kind of kinds) {
+    const e = SRV_ENTITIES[kind];
+    if (!e || !e.coll) continue;
+    const coll = S[e.coll];
+    if (!Array.isArray(coll)) continue;
+    parts.push(`${SRV_KIND_LABEL[kind] || kind} ${coll.length}`);
+    if (parts.length >= 4) break;          // полоса не должна разрастаться
+  }
+  return parts.length ? parts.join(', ') : 'нет данных';
 }
 
 /** Перечитать с сервера всё, что нужно вкладке. */
@@ -13546,6 +13590,22 @@ async function srvLogout() {
  *  потому что держать часть данных на сервере, а часть локально нельзя: расчёт
  *  ходит по всем коллекциям сразу и на смеси даст неверный план. */
 async function toggleServerMode(on) {
+  // Включение ЗАМЕЩАЕТ то, что на экране, данными базы. Если человек только что
+  // загрузил файл локально, его данные исчезнут — и выглядит это как поломка,
+  // хотя файл просто никогда не был в базе. Предупреждаем до, а не объясняем после.
+  if (on && !SRV.on) {
+    const local = srvLocalRecordCount();
+    if (local > 0 && !await _confirm(
+        `Сейчас на экране данные из этого браузера (${local} записей).\n\n` +
+        'Включение серверного режима покажет то, что лежит в базе, — локальные ' +
+        'данные с экрана уйдут.\n\nЕсли их нужно перенести в базу: выключите ' +
+        'режим, выгрузите файл («Файл» → «Экспорт»), включите режим и залейте ' +
+        'файл кнопкой «Залить файл» (она у администратора).\n\nВключить?')) {
+      renderActive();
+      return;
+    }
+  }
+
   SRV.on = on;
   if (on) {
     let me = await SRV.whoami();
