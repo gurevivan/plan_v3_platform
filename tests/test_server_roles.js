@@ -238,5 +238,59 @@ const contract = (over = {}) => Object.assign({
     check(`вкладка «${tab}» → раздел`, sec === null || known.has(sec), true);
   }
 
+
+  // ── Площадки в полосе режима и при сохранении пользователя ──────────────
+  console.log('\n── Видно, какие площадки доступны ──');
+  asUser([], { username: 'мастер', all_ops: false,
+               ops_read: ['Бухара'], ops_edit: ['Бухара'] });
+  const banner = ctx.srvBannerHtml('microplan');
+  // Раньше выводились только площадки на ПРАВКУ, и человек с доступом к одной
+  // площадке не понимал, почему «пропали» данные — а они просто не его.
+  check('названа доступная площадка', /Бухара/.test(banner), true);
+  check('не сказано «все площадки»', /все площадки/.test(banner), false);
+
+  asUser([], { all_ops: false, ops_read: [], ops_edit: [] });
+  check('пустой доступ назван прямо',
+        /площадок не выдано/.test(ctx.srvBannerHtml('microplan')), true);
+
+  asUser([], { is_superuser: true, all_sections: true, all_ops: true });
+  check('администратору — все площадки',
+        /все площадки/.test(ctx.srvBannerHtml('microplan')), true);
+
+  console.log('\n── Доступы не стираются из-за незагруженного справочника ──');
+  baseState(); reset();
+  asUser([], { is_superuser: true, all_sections: true });
+  T.S.ops = [];                              // справочник ОП не загружен
+  // После сохранения экран перечитывается, поэтому заглушка должна выдерживать
+  // и перерисовку: querySelector там ищет свои кнопки.
+  const fakeBox = (opsSel) => ({
+    querySelectorAll: (sel) => (opsSel && /data-op/.test(sel)) ? opsSel : [],
+    querySelector: (sel) => (/data-admin/.test(sel) || /data-active/.test(sel))
+      ? { checked: true }
+      : { onclick: null, onchange: null, value: '', files: [] },
+    _close: () => {},
+    innerHTML: '',
+  });
+  ctx._srvUsersBox = fakeBox(null);
+  await ctx.srvUserSave(7);
+  await flush();
+  const sent = byMethod('PATCH').find(c => /\/api\/users\//.test(c.url));
+  check('запрос ушёл', !!sent, true);
+  // Отправить «ни одной отмеченной» здесь значило бы стереть человеку все
+  // площадки — молча и не тем действием, которое затевалось.
+  check('площадки не отправлены', sent && sent.body.ops === undefined, true);
+  check('роли отправлены', sent && Array.isArray(sent.body.roles), true);
+  check('пользователю сказали', /площадки оставлены без изменений/.test(alerts.join('\n')), true);
+
+  reset();
+  T.S.ops = [{ id: 1, name: 'Бухара', workshop: 'Швейный цех' }];
+  ctx._srvUsersBox = fakeBox([{ value: 'edit', getAttribute: () => 'Бухара' }]);
+  await ctx.srvUserSave(7);
+  await flush();
+  const sent2 = byMethod('PATCH').find(c => /\/api\/users\//.test(c.url));
+  check('со справочником площадки уходят',
+        sent2 && sent2.body.ops && sent2.body.ops[0].op_name, 'Бухара');
+  check('право правки передано', sent2 && sent2.body.ops[0].can_edit, true);
+
   finish();
 })();

@@ -53,6 +53,15 @@ if (typeof SRV_TAB_KINDS !== 'undefined') globalThis.SRV_TAB_KINDS = SRV_TAB_KIN
 if (typeof SRV_LOAD_ORDER !== 'undefined') globalThis.SRV_LOAD_ORDER = SRV_LOAD_ORDER;
 if (typeof SRV_TC_STAGES !== 'undefined') globalThis.SRV_TC_STAGES = SRV_TC_STAGES;
 if (typeof SRV_TAB_SECTION !== 'undefined') globalThis.SRV_TAB_SECTION = SRV_TAB_SECTION;
+// Объявлена через `let`, поэтому свойством globalThis не становится и подменить
+// её из теста нельзя. Связываем явно — иначе экран пользователей не проверить.
+if (typeof _srvUsersBox !== 'undefined') {
+  Object.defineProperty(globalThis, '_srvUsersBox', {
+    get() { return _srvUsersBox; },
+    set(v) { _srvUsersBox = v; },
+    configurable: true,
+  });
+}
 """
 
 out_dir = ROOT / '_build'

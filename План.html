@@ -11082,10 +11082,15 @@ function srvBannerHtml(kind) {
     ? (u.is_superuser ? 'администратор'
        : ((u.roles && u.roles.length) ? u.roles.join(', ') : 'только просмотр'))
     : '';
+  // Площадки показываем ПО ЧТЕНИЮ: именно они решают, что вообще видно на
+  // вкладках. Раньше выводились только те, где разрешена правка, и человек с
+  // доступом к одной площадке не понимал, почему у него «пропали» данные —
+  // а они просто не его.
+  const read = (u && u.ops_read) || [];
   const who = u
-    ? `${esc(u.username)} · ${esc(role)}${u.all_ops ? ' · все ОП'
-        : (u.ops_edit && u.ops_edit.length
-            ? ' · правка: ' + u.ops_edit.map(esc).join(', ') : '')}`
+    ? `${esc(u.username)} · ${esc(role)}` + (u.all_ops
+        ? ' · все площадки'
+        : (read.length ? ` · площадки: ${read.map(esc).join(', ')}` : ' · площадок не выдано'))
     : '';
   // Раздел, который правится с этой вкладки: у аналитики и диаграммы его нет.
   const section = SRV_TAB_SECTION[tab];
@@ -11453,10 +11458,12 @@ function srvUserRowHtml(u, roleNames) {
       </select>
       <span>${esc(name)}</span>
     </div>`).join('');
-  // Пустой набор площадок означает «все» — это же правило действует в расчёте,
-  // поэтому подписываем его прямо здесь, иначе выглядит как отсутствие доступа.
-  const allOps = u.all_ops
-    ? '<div style="font-size:11px;color:#16a34a">ни одной не отмечено = <b>все площадки</b></div>' : '';
+  // Пустой набор площадок означает «все» — это же правило действует в расчёте.
+  // Подпись стоит ВСЕГДА, а не только когда набор уже пуст: администратор,
+  // снимающий последнюю галочку, должен видеть, что тем самым ОТКРЫВАЕТ всё,
+  // а не закрывает.
+  const allOps = '<div style="font-size:11px;color:#16a34a;margin-top:2px">' +
+    'ни одной не отмечено = <b>все площадки</b></div>';
   return `<tr data-userrow="${u.id}">
     <td style="vertical-align:top"><b>${esc(u.username)}</b></td>
     <td style="vertical-align:top">${u.is_superuser
@@ -11483,18 +11490,33 @@ async function srvUserSave(id) {
   if (!box) return;
   const roles = [...box.querySelectorAll(`input[data-user="${id}"][data-role]`)]
     .filter(el => el.checked).map(el => el.getAttribute('data-role'));
-  const ops = [...box.querySelectorAll(`select[data-user="${id}"][data-op]`)]
-    .filter(el => el.value)
-    .map(el => ({ op_name: el.getAttribute('data-op'), can_edit: el.value === 'edit' }));
+  // Список площадок строится из справочника ОП, загруженного в браузере. Если он
+  // пуст (не успел загрузиться, или у самого администратора урезан доступ), то
+  // отправить «ни одной отмеченной» значит СТЕРЕТЬ человеку все выданные
+  // площадки — молча и не тем действием, которое затевалось. В таком случае
+  // ключ не отправляем вовсе: сервер тогда доступы не трогает.
+  const known = srvAllOpNames();
+  const ops = known.length
+    ? [...box.querySelectorAll(`select[data-user="${id}"][data-op]`)]
+        .filter(el => el.value)
+        .map(el => ({ op_name: el.getAttribute('data-op'), can_edit: el.value === 'edit' }))
+    : null;
   const admin = box.querySelector(`input[data-user="${id}"][data-admin]`);
   const active = box.querySelector(`input[data-user="${id}"][data-active]`);
 
+  const body = {
+    roles,
+    is_superuser: !!(admin && admin.checked),
+    is_active: !!(active && active.checked),
+  };
+  if (ops !== null) body.ops = ops;
+
   try {
-    await SRV.patch('users/' + id + '/', {
-      roles, ops,
-      is_superuser: !!(admin && admin.checked),
-      is_active: !!(active && active.checked),
-    });
+    await SRV.patch('users/' + id + '/', body);
+    if (ops === null) {
+      _alert('Справочник ОП не загружен, поэтому площадки оставлены без изменений.\n' +
+             'Роли и признаки сохранены.');
+    }
   } catch (e) {
     _alert('Не удалось сохранить:\n' + srvErrText(e));
   }
