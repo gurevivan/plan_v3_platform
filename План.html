@@ -757,7 +757,7 @@
       </div>
       <input type="file" id="loadAnyFile" accept=".json" style="display:none" onchange="_loadFileInput(this.files[0])">
     </div>
-    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 02.08.2026 22:10</span></h1>
+    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 02.08.2026 23:40</span></h1>
   </header>
   <div class="app-body">
     <aside class="app-sidebar" aria-label="Разделы приложения">
@@ -963,6 +963,23 @@ function _saveFSA(data, suggestedName) {
 // ── Загрузка: вызывается через <label for="loadAnyFile"> ──
 function _loadFileInput(file) {
   if (!file) return;
+  // В серверном режиме файл НЕЛЬЗЯ применять к браузеру: данные легли бы только
+  // на экран, база осталась бы прежней, и первое же «Обновить с сервера» их
+  // стёрло бы. Выглядит это как потеря файла, а на деле он туда и не попадал.
+  //
+  // Проверка стоит здесь, а не только в `importAllData`: кнопка «Загрузить»
+  // зовёт этот путь напрямую, и запрет её не касался — ровно так данные и
+  // «пропадали».
+  if (SRV.on) {
+    if (SRV.user && SRV.user.is_superuser) {
+      srvUploadDialog(file);          // сразу открываем заливку с этим файлом
+    } else {
+      _alert('Идёт серверный режим — файл заменил бы данные только у вас на ' +
+             'экране, а в базе ничего бы не изменилось.\n\nПопросите ' +
+             'администратора залить выгрузку: у него есть кнопка «Залить файл».');
+    }
+    return;
+  }
   _loadJsonFile(file, _applyFileData);
 }
 
@@ -11189,7 +11206,7 @@ function srvReloadRefs() { return srvReloadTab('refs'); }
 // бригада+заказ+артикулы для смены), а НЕ по внутреннему id: счётчик id у каждого
 // браузера свой, и слияние по нему смешало бы разные записи.
 
-async function srvUploadDialog() {
+async function srvUploadDialog(preselected) {
   if (!SRV.on) { _alert('Заливка на сервер работает только в серверном режиме.'); return; }
   if (!SRV.user || !SRV.user.is_superuser) { _alert('Доступно только администратору.'); return; }
 
@@ -11234,12 +11251,22 @@ async function srvUploadDialog() {
     </div>`;
 
   box.querySelector('#_upCancel').onclick = close;
-  box.querySelector('#_upGo').onclick = () => srvUploadRun(box, close);
+  box.querySelector('#_upGo').onclick = () => srvUploadRun(box, close, preselected);
+
+  // Файл пришёл из кнопки «Загрузить» — показываем, что именно будет залито:
+  // выбирать его второй раз человеку незачем.
+  if (preselected) {
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:12px;color:#334155;margin:-6px 0 12px';
+    note.textContent = 'Выбран файл: ' + preselected.name;
+    const input = box.querySelector('#_upFile');
+    if (input) { input.style.display = 'none'; input.parentNode.insertBefore(note, input); }
+  }
 }
 
-async function srvUploadRun(box, close) {
+async function srvUploadRun(box, close, preselected) {
   const input = box.querySelector('#_upFile');
-  const file = input && input.files && input.files[0];
+  const file = preselected || (input && input.files && input.files[0]);
   if (!file) { _alert('Выберите файл выгрузки.'); return; }
   const merge = box.querySelector('input[name="_upMode"]:checked').value === 'merge';
 
@@ -11261,13 +11288,28 @@ async function srvUploadRun(box, close) {
     go.disabled = false;
     return;
   }
-  if (!data || !Array.isArray(data.microplan)) {
-    out.textContent = 'Это не похоже на выгрузку «Плана» — нет микроплана.';
+  // Частичная выгрузка (например, одни справочники) годится для СЛИЯНИЯ: чего в
+  // файле нет, того слияние не трогает. Для замещения не годится — стёрло бы всё
+  // остальное, и человек узнал бы об этом уже после.
+  const known = Object.keys(SRV_ENTITIES)
+    .map(k => SRV_ENTITIES[k].coll)
+    .filter(c => c && data && data[c] !== undefined);
+  if (!known.length) {
+    out.textContent = 'Это не похоже на выгрузку «Плана» — нет ни одной известной ' +
+                      'коллекции данных.';
     go.disabled = false;
     return;
   }
+  if (!merge && !Array.isArray(data.microplan)) {
+    out.textContent = 'Это частичная выгрузка (нет микроплана). Замещение стёрло бы ' +
+                      'остальные данные — выберите «Слить с базой».';
+    go.disabled = false;
+    return;
+  }
+  out.textContent = 'В файле: ' + known.map(c => `${c} ${(data[c] || []).length}`)
+                                       .slice(0, 6).join(', ');
 
-  out.textContent = 'Отправляю на сервер… Большой файл обрабатывается до минуты.';
+  out.textContent += '\nОтправляю на сервер… Большой файл обрабатывается до минуты.';
   try {
     const resp = await SRV.post('import' + (merge ? '?merge=1' : ''), data);
     out.textContent = (resp && resp.report) || (resp && resp.detail) || 'Готово.';

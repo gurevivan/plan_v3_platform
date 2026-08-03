@@ -337,5 +337,44 @@ const contract = (over = {}) => Object.assign({
   ctx._confirm = savedConfirm;
   serverOn = true;
 
+  // ── Кнопка «Загрузить» не кладёт файл мимо базы ─────────────────────────
+  console.log('\n── Файл в серверном режиме идёт в базу, а не в браузер ──');
+  baseState(); reset();
+  serverOn = true;
+  asUser([], { is_superuser: true, all_sections: true });
+
+  // Раньше кнопка «Загрузить» звала `_applyFileData` напрямую, минуя проверку
+  // серверного режима: файл ложился в браузер, база оставалась прежней, и первое
+  // же «Обновить с сервера» его стирало. Выглядело как потеря данных.
+  let opened = null;
+  const savedDialog = ctx.srvUploadDialog;
+  ctx.srvUploadDialog = (f) => { opened = f; };
+  // Подменяем чтение файла целиком: в песочнице нет FileReader, а нам важно
+  // одно — дошло ли дело до применения файла к браузеру.
+  let applied = 0;
+  const savedLoad = ctx._loadJsonFile;
+  ctx._loadJsonFile = () => { applied++; };
+
+  ctx._loadFileInput({ name: 'выгрузка.json' });
+  check('файл не применён к браузеру', applied, 0);
+  check('открыт диалог заливки в базу', opened && opened.name, 'выгрузка.json');
+
+  // Не администратору заливать нечем — ему объясняют, а не молчат.
+  opened = null; alerts = [];
+  asUser([], { is_superuser: false });
+  ctx._loadFileInput({ name: 'выгрузка.json' });
+  check('обычному пользователю диалог не открыт', opened, null);
+  check('файл всё равно не применён', applied, 0);
+  check('сказано, к кому идти', /администратора/.test(alerts.join('\n')), true);
+
+  // Вне серверного режима файл грузится локально, как раньше.
+  serverOn = false;
+  ctx._loadFileInput({ name: 'выгрузка.json' });
+  check('локально файл применяется', applied, 1);
+  serverOn = true;
+
+  ctx.srvUploadDialog = savedDialog;
+  ctx._loadJsonFile = savedLoad;
+
   finish();
 })();

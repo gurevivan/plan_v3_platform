@@ -53,9 +53,22 @@ class Command(BaseCommand):
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise CommandError(f'это не JSON: {exc}')
-        if not isinstance(data, dict) or 'microplan' not in data:
-            raise CommandError('это не похоже на выгрузку «Плана» '
-                               '(нет ключа microplan)')
+        if not isinstance(data, dict):
+            raise CommandError('это не похоже на выгрузку «Плана»')
+
+        # При СЛИЯНИИ годится и частичная выгрузка — например, одни справочники:
+        # коллекции, которых в файле нет, просто не трогаются. При ЗАМЕЩЕНИИ так
+        # нельзя: частичный файл стёр бы всё остальное, и человек узнал бы об этом
+        # уже после.
+        from core.services import merge as mg
+        known = [c for c in mg.LIST_COLLS + mg.DICT_COLLS if c in data]
+        if not known:
+            raise CommandError('в файле нет ни одной известной коллекции — '
+                               'это не выгрузка «Плана»')
+        if not opts['merge'] and 'microplan' not in data:
+            raise CommandError(
+                'это частичная выгрузка (нет микроплана), а замещение стёрло бы '
+                'остальные данные. Используйте --merge, чтобы слить с базой.')
 
         stats = None
         if opts['merge']:

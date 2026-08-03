@@ -545,7 +545,7 @@ def import_state(request):
                         status=status.HTTP_403_FORBIDDEN)
 
     data = request.data
-    if not isinstance(data, dict) or 'microplan' not in data:
+    if not isinstance(data, dict):
         return Response({'detail': 'Ожидается объект выгрузки «Плана»'},
                         status=status.HTTP_400_BAD_REQUEST)
 
