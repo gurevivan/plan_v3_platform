@@ -80,6 +80,10 @@ PG_PASSWORD=$(gen 24)
 # Порт, на котором откроется приложение.
 PLAN_PORT=8000
 TZ=Asia/Tashkent
+
+# Сеть Docker. Оставьте пустым — установка создаст свою (plan-net). Укажите имя
+# существующей сети, если на сервере кончились свободные подсети.
+PLAN_NET=
 EOF
   chmod 600 .env
 fi
@@ -100,8 +104,52 @@ if [ -z "$(docker ps -q --filter "name=$WEB")" ] \
 fi
 
 # ── Сеть и том ──────────────────────────────────────────────────────────────
-docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null
-docker volume  inspect "$VOL" >/dev/null 2>&1 || docker volume  create "$VOL" >/dev/null
+#
+# Своя сеть нужна, чтобы приложение находило базу по имени контейнера. Но на
+# сервере, где Docker живёт давно, встроенный пул адресов бывает исчерпан:
+# «all predefined address pools have been fully subnetted». Тогда Docker не может
+# подобрать подсеть сам — её надо назвать явно. Перебираем кандидатов и отдаём
+# проверку на пересечение самому Docker: он знает про занятые диапазоны точно,
+# а разбирать их в скрипте значит написать вторую, менее надёжную проверку.
+#
+# Если в .env задан PLAN_NET, берём готовую сеть и ничего не создаём.
+NET="${PLAN_NET:-$NET}"
+
+if ! docker network inspect "$NET" >/dev/null 2>&1; then
+  if [ -n "${PLAN_NET:-}" ]; then
+    echo "Сеть «$NET» из .env не найдена. Уберите PLAN_NET или создайте сеть сами."
+    exit 1
+  fi
+  created=""
+  if docker network create "$NET" >/dev/null 2>&1; then
+    created=1
+  else
+    for sub in 172.30.0.0/24 172.31.0.0/24 10.77.0.0/24 10.78.0.0/24 \
+               192.168.240.0/24 192.168.241.0/24; do
+      if docker network create --subnet "$sub" "$NET" >/dev/null 2>&1; then
+        echo "Сеть создана с подсетью $sub."
+        created=1
+        break
+      fi
+    done
+  fi
+  if [ -z "$created" ]; then
+    cat <<'EOF'
+Не удалось создать сеть Docker: свободных подсетей не осталось
+(«all predefined address pools have been fully subnetted»).
+
+Что можно сделать — любое из трёх:
+
+  1. Убрать неиспользуемые сети:      docker network prune
+  2. Посмотреть, что занято:          docker network ls
+  3. Использовать существующую сеть — допишите в .env строку
+     PLAN_NET=имя_сети   и запустите установку снова.
+EOF
+    exit 1
+  fi
+fi
+
+docker volume inspect "$VOL" >/dev/null 2>&1 || docker volume create "$VOL" >/dev/null
 
 # ── База ────────────────────────────────────────────────────────────────────
 # Порт наружу не выставляем: к базе ходит только приложение.

@@ -202,7 +202,15 @@ docker exec -i plan-web python manage.py import_json - < выгрузка.json
 PLAN_PORT=8000                     # порт, на котором открывается приложение
 DJANGO_ALLOWED_HOSTS=plan.фирма.uz # домены и адреса, с которых пускать
 TZ=Asia/Tashkent                   # часовой пояс
+PLAN_NET=                          # сеть Docker: пусто — создать свою
 ```
+
+**Про сеть.** Установка создаёт свою сеть `plan-net` — по ней приложение находит
+базу по имени контейнера. Если Docker на сервере работает давно, свободные
+подсети могут кончиться (`all predefined address pools have been fully
+subnetted`); тогда установка сама пробует задать подсеть явно. Если и это не
+проходит, впишите в `PLAN_NET` имя существующей сети — контейнеры подключатся к
+ней, и ничего создавать не потребуется.
 
 После правки:
 
@@ -225,6 +233,7 @@ bash setup.sh
 | Что видно | Почему | Что делать |
 |---|---|---|
 | `port is already allocated` | порт 8000 занят другой программой | поменяйте `PLAN_PORT` в `.env` и запустите `bash setup.sh` |
+| `all predefined address pools have been fully subnetted` | на сервере кончились свободные подсети Docker — обычно много старых сетей | установка сама пробует явные подсети; если не помогло: `docker network prune`, либо укажите готовую сеть в `.env` — `PLAN_NET=имя_сети` |
 | Страница не открывается, `bash setup.sh --status` показывает `Exited` | приложение упало при старте | `bash setup.sh --logs` — там причина |
 | `нужен PG_PASSWORD` / `нужен DJANGO_SECRET_KEY` | нет файла `.env` | запустите `bash setup.sh` |
 | «Вход не выполнен» при включении серверного режима | нет учётной записи | `docker exec -it plan-web python manage.py createsuperuser` |
