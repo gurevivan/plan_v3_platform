@@ -29,6 +29,9 @@ class Command(BaseCommand):
         parser.add_argument('path', help='путь к JSON-экспорту или «-» для ввода из потока')
         parser.add_argument('--keep', action='store_true',
                             help='не очищать таблицы перед загрузкой')
+        parser.add_argument('--merge', action='store_true',
+                            help='слить с тем, что уже в базе: дубли обновить, '
+                                 'остальное добавить (иначе данные ЗАМЕЩАЮТСЯ)')
 
     def handle(self, *args, **opts):
         # «-» читает из стандартного ввода: внутрь контейнера файл иначе пришлось бы
@@ -54,6 +57,17 @@ class Command(BaseCommand):
             raise CommandError('это не похоже на выгрузку «Плана» '
                                '(нет ключа microplan)')
 
+        stats = None
+        if opts['merge']:
+            # Сливаем на уровне выгрузки, а записываем прежним путём. Второй способ
+            # писать в базу заводить нельзя: карта полей одна на импорт и экспорт,
+            # и построчный upsert стал бы её вторым, расходящимся экземпляром.
+            from core.management.commands.export_json import build_export
+            from core.services import merge as mg
+
+            base = build_export()
+            data, stats = mg.prepare(base, data)
+
         run = m.ImportRun.objects.create(source=source)
         try:
             with transaction.atomic():
@@ -70,8 +84,18 @@ class Command(BaseCommand):
             run.save()
             raise
 
+        if stats is not None:
+            self.stdout.write(self.style.SUCCESS(f'Слито с базой из {source}:'))
+            width = max((len(k) for k in stats), default=1)
+            for coll, s in stats.items():
+                self.stdout.write(f"  {coll.ljust(width)}  добавлено {s['добавлено']}, "
+                                  f"обновлено {s['обновлено']}")
+            self.stdout.write('')
+            self.stdout.write('Стало в базе:')
+        else:
+            self.stdout.write(self.style.SUCCESS(f'Загружено из {source}:'))
+
         width = max(len(k) for k in counts)
-        self.stdout.write(self.style.SUCCESS(f'Загружено из {source}:'))
         for k, v in counts.items():
             self.stdout.write(f'  {k.ljust(width)}  {v}')
 

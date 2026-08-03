@@ -757,7 +757,7 @@
       </div>
       <input type="file" id="loadAnyFile" accept=".json" style="display:none" onchange="_loadFileInput(this.files[0])">
     </div>
-    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 02.08.2026 16:50</span></h1>
+    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 02.08.2026 20:30</span></h1>
   </header>
   <div class="app-body">
     <aside class="app-sidebar" aria-label="Разделы приложения">
@@ -4682,9 +4682,12 @@ function importAllData(file, silent) {
   // сервер к нему — то есть залила бы файл одного пользователя всем остальным.
   if (SRV.on) {
     _alert('Идёт серверный режим — загрузка файла заменила бы данные только у вас ' +
-           'и разошлась бы с базой.\n\nВыключите серверный режим, чтобы работать ' +
-           'с файлом локально, либо попросите администратора загрузить состояние ' +
-           'на сервер.');
+           'и разошлась бы с базой.\n\n' +
+           (SRV.user && SRV.user.is_superuser
+             ? 'Чтобы залить выгрузку в базу, нажмите «Залить файл» в зелёной полосе: ' +
+               'там есть режим слияния, при котором ничего не пропадёт.'
+             : 'Выключите серверный режим, чтобы работать с файлом локально, либо ' +
+               'попросите администратора залить выгрузку на сервер.'));
     return;
   }
   const reader = new FileReader();
@@ -11105,6 +11108,8 @@ function srvBannerHtml(kind) {
       ? `<button class="btn btn-outline btn-sm" onclick="srvCheckAnalytics()">Сверить с расчётом сервера</button>` : ''}
     ${on ? `<button class="btn btn-outline btn-sm" onclick="srvChangesDialog('${tab}')">Кто менял</button>` : ''}
     ${on && u && u.is_superuser
+      ? `<button class="btn btn-outline btn-sm" onclick="srvUploadDialog()">Залить файл</button>` : ''}
+    ${on && u && u.is_superuser
       ? `<button class="btn btn-outline btn-sm" onclick="srvUsersDialog()">Пользователи</button>` : ''}
     ${on ? `<button class="btn btn-outline btn-sm" onclick="srvLogout()">Выйти</button>` : ''}
   </div>`;
@@ -11119,6 +11124,119 @@ async function srvReloadTab(tab) {
 
 /** Обратная совместимость: кнопка справочников звалась так. */
 function srvReloadRefs() { return srvReloadTab('refs'); }
+
+// ──────────────────── Заливка выгрузки на сервер (администратор) ─────────────
+//
+// Через меню «Файл» в серверном режиме загружать нельзя: файл заменил бы данные
+// только в браузере и разошёлся бы с базой. Здесь — другой путь: файл уходит НА
+// СЕРВЕР, и база решает, что с ним делать.
+//
+// Два режима, и разница между ними дорогая:
+//   • слияние — совпадающие записи обновляются, новые добавляются. Так несколько
+//     выгрузок с разных компьютеров собираются в одну базу;
+//   • замещение — всё прежнее удаляется. Нужно редко (перенос с нуля).
+//
+// Дубли ищутся по деловому ключу (номер контракта, номер заказа, дата+ОП+передел+
+// бригада+заказ+артикулы для смены), а НЕ по внутреннему id: счётчик id у каждого
+// браузера свой, и слияние по нему смешало бы разные записи.
+
+async function srvUploadDialog() {
+  if (!SRV.on) { _alert('Заливка на сервер работает только в серверном режиме.'); return; }
+  if (!SRV.user || !SRV.user.is_superuser) { _alert('Доступно только администратору.'); return; }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dlg-overlay';
+  const box = document.createElement('div');
+  box.className = 'dlg-box';
+  box.style.maxWidth = '620px';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  const close = () => { overlay.parentNode && document.body.removeChild(overlay); };
+
+  box.innerHTML = `
+    <div class="dlg-msg">
+      <b>Залить выгрузку на сервер</b>
+      <div style="font-size:12px;color:#64748b;margin-top:6px">
+        Файл, полученный через меню «Файл» → «Экспорт» на любом компьютере.
+      </div>
+    </div>
+    <div style="margin:12px 0">
+      <input type="file" id="_upFile" accept=".json,application/json"
+             style="display:block;margin-bottom:14px">
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;cursor:pointer">
+        <input type="radio" name="_upMode" value="merge" checked style="margin-top:3px">
+        <span><b>Слить с базой</b><br>
+          <span style="font-size:12px;color:#64748b">Совпадающие записи обновятся,
+            новые добавятся. Ничего не пропадёт — так собирают данные с нескольких
+            компьютеров.</span></span>
+      </label>
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
+        <input type="radio" name="_upMode" value="replace" style="margin-top:3px">
+        <span><b>Заменить всё</b><br>
+          <span style="font-size:12px;color:#b45309">Прежние данные будут удалены
+            целиком. Нужно только при переносе с нуля.</span></span>
+      </label>
+    </div>
+    <div id="_upResult" style="font-size:12px;white-space:pre-wrap;max-height:34vh;
+         overflow:auto;color:#334155"></div>
+    <div class="dlg-btns">
+      <button class="btn btn-outline" id="_upCancel">Отмена</button>
+      <button class="btn btn-primary" id="_upGo">Залить</button>
+    </div>`;
+
+  box.querySelector('#_upCancel').onclick = close;
+  box.querySelector('#_upGo').onclick = () => srvUploadRun(box, close);
+}
+
+async function srvUploadRun(box, close) {
+  const input = box.querySelector('#_upFile');
+  const file = input && input.files && input.files[0];
+  if (!file) { _alert('Выберите файл выгрузки.'); return; }
+  const merge = box.querySelector('input[name="_upMode"]:checked').value === 'merge';
+
+  if (!merge && !await _confirm(
+      'Заменить ВСЕ данные на сервере содержимым файла?\n\n' +
+      'Всё, что есть в базе сейчас, будет удалено. Если нужно просто добавить ' +
+      'данные — выберите «Слить с базой».')) return;
+
+  const out = box.querySelector('#_upResult');
+  const go = box.querySelector('#_upGo');
+  go.disabled = true;
+  out.textContent = 'Читаю файл…';
+
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch (err) {
+    out.textContent = 'Файл не читается: ' + err.message;
+    go.disabled = false;
+    return;
+  }
+  if (!data || !Array.isArray(data.microplan)) {
+    out.textContent = 'Это не похоже на выгрузку «Плана» — нет микроплана.';
+    go.disabled = false;
+    return;
+  }
+
+  out.textContent = 'Отправляю на сервер… Большой файл обрабатывается до минуты.';
+  try {
+    const resp = await SRV.post('import' + (merge ? '?merge=1' : ''), data);
+    out.textContent = (resp && resp.report) || (resp && resp.detail) || 'Готово.';
+  } catch (err) {
+    out.textContent = 'Не удалось: ' + srvErrText(err);
+    go.disabled = false;
+    return;
+  }
+
+  // Перечитываем всё: база изменилась, и держать на экране прежний срез нельзя —
+  // первая же правка ушла бы поверх чужих данных.
+  out.textContent += '\n\nОбновляю данные на экране…';
+  for (const kind of SRV_LOAD_ORDER) await srvLoad(kind);
+  recalcNextId();
+  renderActive();
+  go.textContent = 'Готово';
+  out.textContent += '\nГотово.';
+}
 
 // ───────────────────────────── Журнал изменений ──────────────────────────────
 //

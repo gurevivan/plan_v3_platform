@@ -525,9 +525,20 @@ def _whoami(user):
 def import_state(request):
     """Загрузка полного состояния в формате приложения.
 
-    ЗАМЕЩАЕТ все данные, поэтому только для администратора. Ждём файл, уже
-    нормализованный приложением: слой из 22 миграций старых форматов здесь
-    намеренно не воспроизводится (DATA_CONTRACT.md §2).
+    Два режима, и разница между ними важная:
+
+    * без параметров — ЗАМЕЩАЕТ все данные;
+    * `?merge=1` — сливает с тем, что уже в базе: совпадающие записи обновляются,
+      новые добавляются. Так несколько выгрузок с разных компьютеров собираются
+      в одну базу, не затирая друг друга.
+
+    Дубли ищутся по деловому ключу (номер контракта, номер заказа, дата+ОП+передел
+    для микроплана), а НЕ по `id`: счётчик id у каждого браузера свой, и слияние по
+    нему смешало бы разные записи (`core/services/merge.py`).
+
+    Только для администратора. Ждём файл, уже нормализованный приложением: слой из
+    22 миграций старых форматов здесь намеренно не воспроизводится
+    (DATA_CONTRACT.md §2).
     """
     if not request.user.is_superuser:
         return Response({'detail': 'Загрузка состояния доступна только администратору'},
@@ -547,14 +558,25 @@ def import_state(request):
         json.dump(data, fh, ensure_ascii=False)
         tmp = fh.name
 
+    merge = str(request.query_params.get('merge', '')).lower() in ('1', 'true', 'yes')
+    args = [tmp] + (['--merge'] if merge else [])
+
     out = io.StringIO()
     try:
-        call_command('import_json', tmp, stdout=out)
+        call_command('import_json', *args, stdout=out)
     except Exception as exc:
         return Response({'detail': f'{type(exc).__name__}: {exc}'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({'detail': 'Состояние загружено',
+    audit.record_bulk(request, 'import', 'import',
+                      ('слияние с базой' if merge else 'полное замещение данных')
+                      + f", файл на {len(data.get('microplan') or [])} строк микроплана")
+
+    return Response({'detail': 'Данные слиты с базой' if merge else 'Состояние загружено',
+                     'merge': merge,
+                     'report': out.getvalue(),
                      'counts': {'microplan': m.MicroplanRow.objects.count(),
                                 'macroplan': m.MacroplanRow.objects.count(),
-                                'orders': m.ProductionOrder.objects.count()}})
+                                'orders': m.ProductionOrder.objects.count(),
+                                'contracts': m.Contract.objects.count(),
+                                'schedules': m.Schedule.objects.count()}})
