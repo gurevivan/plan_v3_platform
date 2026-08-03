@@ -355,21 +355,38 @@ const contract = (over = {}) => Object.assign({
   const savedLoad = ctx._loadJsonFile;
   ctx._loadJsonFile = () => { applied++; };
 
-  ctx._loadFileInput({ name: 'выгрузка.json' });
+  await ctx._loadFileInput({ name: 'выгрузка.json' });
   check('файл не применён к браузеру', applied, 0);
   check('открыт диалог заливки в базу', opened && opened.name, 'выгрузка.json');
 
-  // Не администратору заливать нечем — ему объясняют, а не молчат.
+  // Не администратору заливать нечем — ему объясняют, а не молчат. И называют
+  // учётную запись: если человек считает себя администратором, расхождение видно
+  // сразу, без догадок.
   opened = null; alerts = [];
-  asUser([], { is_superuser: false });
-  ctx._loadFileInput({ name: 'выгрузка.json' });
+  asUser([], { is_superuser: false, username: 'пётр', roles: ['Микропланирование'] });
+  await ctx._loadFileInput({ name: 'выгрузка.json' });
   check('обычному пользователю диалог не открыт', opened, null);
   check('файл всё равно не применён', applied, 0);
-  check('сказано, к кому идти', /администратора/.test(alerts.join('\n')), true);
+  check('названа учётная запись', /пётр/.test(alerts.join('\n')), true);
+  check('названы роли', /Микропланирование/.test(alerts.join('\n')), true);
+  check('сказано, что это не администратор',
+        /не администратор/.test(alerts.join('\n')), true);
+
+  // Пользователь ещё не определён (страница не успела спросить «кто я») —
+  // отказывать нельзя, сначала спрашиваем.
+  opened = null; alerts = [];
+  ctx.SRV.user = null;
+  let askedWho = 0;
+  const savedWhoami = ctx.SRV.whoami;
+  ctx.SRV.whoami = async () => { askedWho++; ctx.SRV.user = { username: 'шеф', is_superuser: true }; return ctx.SRV.user; };
+  await ctx._loadFileInput({ name: 'выгрузка.json' });
+  check('спросили «кто я» перед отказом', askedWho, 1);
+  check('администратору открыли заливку', opened && opened.name, 'выгрузка.json');
+  ctx.SRV.whoami = savedWhoami;
 
   // Вне серверного режима файл грузится локально, как раньше.
   serverOn = false;
-  ctx._loadFileInput({ name: 'выгрузка.json' });
+  await ctx._loadFileInput({ name: 'выгрузка.json' });
   check('локально файл применяется', applied, 1);
   serverOn = true;
 
