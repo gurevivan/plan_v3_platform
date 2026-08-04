@@ -393,5 +393,45 @@ const contract = (over = {}) => Object.assign({
   ctx.srvUploadDialog = savedDialog;
   ctx._loadJsonFile = savedLoad;
 
+  // ── Одна копия данных: в серверном режиме браузер не пишем ──────────────
+  console.log('\n── Состояние не дублируется в браузер ──');
+  baseState(); reset();
+  asUser([], { is_superuser: true, all_sections: true });
+
+  // Следим за localStorage: в серверном режиме туда не должно уходить ничего.
+  let written = [];
+  ctx.localStorage.setItem = (k, v) => { written.push({ k, len: String(v).length }); };
+  ctx.localStorage.getItem = () => null;
+
+  serverOn = true;
+  T.S.nomenclature = [{ id: 1, name: 'Куртка' }];
+  ctx.saveReal();          // песочница глушит save(); здесь нужна настоящая
+  // Локальная копия — «тень»: при следующем открытии она показалась бы первой,
+  // а при недоступном сервере так и осталась бы, с виду рабочая.
+  check('в серверном режиме localStorage не трогаем', written.length, 0);
+
+  serverOn = false;
+  ctx.saveReal();
+  check('вне режима сохраняем как раньше', written.length > 0, true);
+
+  // ── Незакрытые правки видно ─────────────────────────────────────────────
+  console.log('\n── Неотправленные правки распознаются ──');
+  baseState(); ctx.SRV.mirror = {}; reset();
+  serverOn = true;
+  asUser(['contracts']);
+  seed('contracts', [contract()]);
+  check('всё отправлено — терять нечего', ctx.srvHasUnsent(), false);
+
+  T.S.contracts[0].quantity = 12345;
+  check('правка есть — есть что терять', ctx.srvHasUnsent(), true);
+
+  await ctx.srvSync();
+  await flush();          // синхронизация могла встать в очередь за предыдущей
+  check('после отправки снова чисто', ctx.srvHasUnsent(), false);
+
+  serverOn = false;
+  check('вне серверного режима вопрос не стоит', ctx.srvHasUnsent(), false);
+  serverOn = true;
+
   finish();
 })();

@@ -757,7 +757,7 @@
       </div>
       <input type="file" id="loadAnyFile" accept=".json" style="display:none" onchange="_loadFileInput(this.files[0])">
     </div>
-    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 03.08.2026 01:10</span></h1>
+    <h1>Планирование производства <span style="font-size:12px;font-weight:400;color:#94a3b8;margin-left:8px" title="Дата и время сборки версии">вер. 03.08.2026 02:20</span></h1>
   </header>
   <div class="app-body">
     <aside class="app-sidebar" aria-label="Разделы приложения">
@@ -870,6 +870,31 @@ let S = {
   /** Переопределение нормы ШЦ по номеру заказа (норма пошива своя у разных заказов): { [orderNumber]: timeCostMin } */
   tcShOverrides: {}
 };
+
+/** Пустое состояние для серверного режима.
+ *
+ *  В серверном режиме данные приходят из базы, и показывать до их прихода
+ *  локальный снимок нельзя: он выглядит как рабочие данные, хотя может быть
+ *  вчерашним, а при недоступном сервере таким и останется.
+ *
+ *  Настройки интерфейса (тема, активная вкладка, режим проверок) — не данные и
+ *  живут в браузере как жили: они у каждого свои и в базу не ходят.
+ */
+function srvResetStateForServer() {
+  const keep = {
+    activeTab: S.activeTab, microCheckMode: S.microCheckMode,
+    microValidation: S.microValidation, uiTheme: S.uiTheme,
+  };
+  S = {
+    nextId: 1,
+    bases: [], nomenclature: [], ops: [], contracts: [], customerOrders: [],
+    orders: [], macroplan: [], macroEff: [], microplan: [], schedules: [],
+    scheduleMonthOverrides: [], calOverrides: [], holidays: [], manualFrv: [],
+    manualFrvExtraMonths: [], manualFrvPivotExtraRows: [], deliveryMatrix: [],
+    planBaseline: [], orderLinks: [], tcRcOverrides: {}, tcShOverrides: {},
+  };
+  for (const k in keep) if (keep[k] !== undefined) S[k] = keep[k];
+}
 
 /** Норма-override по переделу+заказу: РЦ → tcRcOverrides, ШЦ → tcShOverrides. Иначе null. */
 function stageNormOverride(stage, orderNum) {
@@ -1393,15 +1418,26 @@ function _updateSaveStatus() {}
 
 function save() {
   try {
+    // В СЕРВЕРНОМ РЕЖИМЕ В БРАУЗЕР НЕ ПИШЕМ.
+    //
+    // Иначе состояние живёт в двух местах сразу, и локальная копия становится
+    // «тенью»: при следующем открытии она показывается первой, а если сервер
+    // недоступен — человек видит вчерашний снимок и считает, что всё в порядке.
+    // Почти все истории вида «данные пропали» выросли отсюда.
+    //
+    // Прежнее содержимое localStorage при этом НЕ трогаем: это данные автономной
+    // работы, и к ним нужно вернуться, когда режим выключат.
+    if (typeof SRV !== 'undefined' && SRV.on) {
+      srvSync();
+      return;
+    }
+
     const json = JSON.stringify(S);
     const kb = Math.round(json.length / 1024);
     idbSave(json);
     try { localStorage.setItem(LS, json); } catch(lsErr) { console.warn('localStorage:', lsErr.message); }
     if (_fsh) _fshWrite(json); // File System Access API (надёжнее localStorage для file://)
     _updateSaveStatus(kb);
-    // Единственная точка отправки правок на сервер (см. «Синхронизация по разнице»).
-    // Пока серверный режим выключен или слепка нет — не делает ничего.
-    if (typeof srvSync === 'function') srvSync();
   } catch (e) {
     console.error(e);
     _alert('Не удалось сохранить данные: ' + (e && e.message ? e.message : String(e)) + '.\n\nИспользуйте кнопки «Сохранить» для резервной копии в файл.');
@@ -13327,6 +13363,21 @@ function srvDiff(kind) {
   return { create, update, remove };
 }
 
+/** Есть ли правки, которые ещё не ушли на сервер.
+ *
+ *  В серверном режиме состояние живёт только в памяти: закрыть вкладку с
+ *  неотправленной правкой — значит её потерять. Раньше её подобрал бы
+ *  localStorage, но и на сервер она всё равно не попадала бы, так что потеря
+ *  была та же — просто отложенная и незаметная. */
+function srvHasUnsent() {
+  if (!SRV.on) return false;
+  for (const kind of srvSyncKinds()) {
+    const d = srvDiff(kind);
+    if (d && (d.create.length || d.update.length || d.remove.length)) return true;
+  }
+  return false;
+}
+
 let _srvSyncBusy = false, _srvSyncAgain = false;
 
 /** Отправить накопленную разницу. Вызывается из `save()`, поэтому не бросает. */
@@ -13695,6 +13746,11 @@ async function toggleServerMode(on) {
     // Выключили — забываем слепки: иначе после возврата в режим первая же правка
     // сравнилась бы с состоянием месячной давности и наделала лишних запросов.
     SRV.mirror = {};
+    // И возвращаем ЛОКАЛЬНЫЕ данные. На экране сейчас серверные, а первое же
+    // сохранение записало бы их в localStorage поверх автономных — то есть
+    // выключение режима стирало бы работу, сделанную до его включения.
+    loadLS();
+    recalcNextId();
   }
   renderActive();
 }
@@ -13778,9 +13834,28 @@ async function toggleServerMode(on) {
 // ================================================================
 // Инициализация
 // ================================================================
-loadLS();
+// В серверном режиме локальный снимок НЕ показываем: данные придут из базы.
+// Иначе первые секунды на экране висело бы вчерашнее состояние, а при
+// недоступном сервере оно так и осталось бы — с виду рабочее.
+if (SRV.on) {
+  srvResetStateForServer();
+} else {
+  loadLS();
+}
 applyUiTheme(getUiTheme());
-if (!_idbLoadPending) renderActive();
+if (!_idbLoadPending || SRV.on) renderActive();
+
+// Не дать уйти с неотправленной правкой: в серверном режиме она нигде больше не
+// сохранена. Браузер покажет своё стандартное «уйти со страницы?» — текст задать
+// нельзя, но сам вопрос появится.
+window.addEventListener('beforeunload', function (ev) {
+  try {
+    if (typeof srvHasUnsent === 'function' && srvHasUnsent()) {
+      ev.preventDefault();
+      ev.returnValue = '';
+    }
+  } catch (e) { /* мешать закрытию вкладки из-за своей ошибки нельзя */ }
+});
 
 // Серверный режим был включён — подтянуть данные сразу. Иначе после перезагрузки
 // страницы человек работал бы с локальным снимком: на экране старое, а слепка нет,
